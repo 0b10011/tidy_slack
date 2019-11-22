@@ -1,0 +1,29 @@
+#!/bin/bash
+
+# This is a drop-in replacement for `cargo`
+# that runs in a Docker container as the current user
+# on the latest Rust image
+# and saves all generated files to `./cargo/` and `./target/`.
+#
+# Be sure to make this file executable: `chmod +x ./cargo`
+#
+# # Examples
+#
+# - Running app: `./cargo run`
+# - Building app: `./cargo build`
+# - Building release: `./cargo build --release`
+#
+# # Installing globally
+#
+# To run `cargo` from anywhere,
+# save this file to `/usr/local/bin`.
+# You'll then be able to use `cargo`
+# as if you had installed Rust globally.
+sudo docker run \
+    --rm \
+    --user "$(id -u)":"$(id -g)" \
+    --mount type=bind,src="$PWD",dst=/usr/src/app \
+    --workdir /usr/src/app \
+    --env CARGO_HOME=/usr/src/app/.cargo \
+    rust:latest \
+    cargo "$@"

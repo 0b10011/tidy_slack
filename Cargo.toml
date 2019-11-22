@@ -1,0 +1,14 @@
+[package]
+name = "tidy_slack"
+version = "0.1.0"
+authors = ["Brandon Frohs <brandon@19.codes>"]
+edition = "2018"
+
+[dependencies]
+clap = "*"
+env_logger = "*"
+log = "*"
+num-format = "*"
+reqwest = "*"
+serde = "*"
+serde_json = "*"
