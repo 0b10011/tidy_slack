@@ -12,6 +12,8 @@ use serde::{Deserialize};
 fn main() {
     let now = Instant::now();
 
+    let types = ["public_channel", "private_channel", "mpim", "im"];
+
     let options = App::new("Tidy Slack")
         .version(crate_version!())
         .author("Brandon Frohs <brandon@19.codes>")
@@ -20,6 +22,15 @@ fn main() {
         // Subcommands
         .subcommand(SubCommand::with_name("ls")
             .about("List conversations the authenticated user can access.")
+            .arg(
+                Arg::with_name("types")
+                    .long("types")
+                    .possible_values(&types)
+                    .takes_value(true)
+                    .multiple(true)
+                    .required(true)
+                    .help("Types of messages to list.")
+            )
         )
         // Verbosity level
         .arg(
@@ -73,7 +84,9 @@ fn main() {
 
     if let Some(cmd) = options.subcommand_name() {
         match cmd {
-            "ls" => ls(),
+            "ls" => ls(
+                options.values_of_lossy("types").unwrap()
+            ),
             _ => panic!("Unsupported command: {}", cmd),
         }
     };
@@ -224,17 +237,17 @@ fn get_token() -> Result<String, Box<dyn Error>> {
     Ok(fs::read_to_string("TOKEN")?.parse::<String>()?.trim().to_string())
 }
 
-fn get_conversations() -> Result<Vec<Conversation>, Box<dyn Error>> {
+fn get_conversations(enabled_types: Vec<String>) -> Result<Vec<Conversation>, Box<dyn Error>> {
     let mut response = Client::new()
         .get("https://slack.com/api/conversations.list")
         .query(&[
-            ("exclude_archived", "false"),
-            ("limit", "1000"),
+            ("exclude_archived", "true"),
+            ("limit", "100"),
             // public_channel: #channel
             // private_channel: 🔒channel
-            // mpim: Multi-person IM
-            // im: Direct message
-            ("types", "public_channel,private_channel,mpim,im")
+            // mpim: 🧑🧑multi-person-direct-message
+            // im: 🧑direct-message
+            ("types", &enabled_types.join(","))
         ])
         .header("Authorization", get_token()?)
         .send()?;
@@ -251,9 +264,9 @@ fn get_conversations() -> Result<Vec<Conversation>, Box<dyn Error>> {
     }
 }
 
-fn ls() {
+fn ls(enabled_types: Vec<String>) {
     println!("Retrieving conversations...");
-    let conversations = get_conversations().unwrap();
+    let conversations = get_conversations(enabled_types).unwrap();
     println!("Available conversations:");
     for conversation in conversations {
         match conversation {
