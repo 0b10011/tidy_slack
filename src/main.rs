@@ -4,8 +4,8 @@ use clap::{crate_version, App, AppSettings, Arg, SubCommand};
 use log::{info, LevelFilter};
 use num_format::{Locale, ToFormattedString};
 use std::time::Instant;
-use std::{u64};
-use reqwest::Error;
+use std::{fs, u64};
+use std::error::Error;
 use reqwest::Client;
 use serde::{Deserialize};
 
@@ -71,16 +71,12 @@ fn main() {
         .filter(Some(module_path!()), filter)
         .init();
 
-    // if let Some(cmd) = options.subcommand_name() {
-    //     match cmd {
-    //         "ls" => ls(),
-    //         _ => ls(),// Err(format!("Unsupported command: {}", cmd)),
-    //     }
-    // };
-    match ls() {
-        Ok(()) => info!("It worked!"),
-        _ => info!("It didn't work :("),
-    }
+    if let Some(cmd) = options.subcommand_name() {
+        match cmd {
+            "ls" => ls(),
+            _ => panic!("Unsupported command: {}", cmd),
+        }
+    };
 
     info!(
         "Command completed in {}.{}s",
@@ -90,9 +86,10 @@ fn main() {
 }
 
 #[derive(Deserialize, Debug)]
+#[serde(untagged)]
 enum ChannelsKind {
-    // Channels,
-    ChannelsError
+    Channels(Channels),
+    Error(ChannelsError)
 }
 
 #[derive(Deserialize, Debug)]
@@ -100,32 +97,117 @@ struct ChannelsError {
     ok: bool,
     error: String,
 }
+impl std::fmt::Display for ChannelsError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.error)
+    }
+}
+impl Error for ChannelsError {
+}
 
 #[derive(Deserialize, Debug)]
 struct Channels {
     ok: bool,
+    warning: Option<String>,
     channels: Vec<Channel>,
+    response_metadata: Metadata,
 }
 
 #[derive(Deserialize, Debug)]
 struct Channel {
     id: String,
     name: String,
+    is_channel: bool,
+    is_group: bool,
+    is_im: bool,
+    created: u64,
+    is_archived: bool,
+    is_general: bool,
+    unlinked: u64,
+    name_normalized: String,
+    // is_read_only: bool,
+    is_shared: bool,
+    parent_conversation: Option<String>,
+    creator: String,
+    is_ext_shared: bool,
+    is_org_shared: bool,
+    shared_team_ids: Vec<String>, // Not in documentation, but shows up in results
+    pending_shared: Vec<String>, // I believe this should always be an empty array?
+    pending_connected_team_ids: Vec<String>, // Not in documentation, but shows up in results
+    is_pending_ext_shared: bool,
+    is_member: bool,
+    is_private: bool,
+    is_mpim: bool,
+    last_read: Option<String>,
+    is_open: Option<bool>,
+    topic: Topic,
+    purpose: Purpose,
+    previous_names: Option<Vec<String>>,
+    num_members: Option<u64>,
+    priority: Option<u64>,
+    // locale: String
 }
 
-fn ls() -> Result<(), Error> {
-    let request_url = "https://slack.com/api/users.conversations";
+#[derive(Deserialize, Debug)]
+struct Topic {
+    value: Option<String>,
+    creator: Option<String>,
+    last_set: Option<u64>,
+}
 
-    let client = Client::new();
+#[derive(Deserialize, Debug)]
+struct Purpose {
+    value: Option<String>,
+    creator: Option<String>,
+    last_set: Option<u64>,
+}
 
-    let mut response = client
-        .get(request_url)
+#[derive(Deserialize, Debug)]
+struct Metadata {
+    next_cursor: String,
+}
+
+fn get_token() -> Result<String, Box<dyn Error>> {
+    Ok(fs::read_to_string("TOKEN")?.parse::<String>()?.trim().to_string())
+}
+
+fn get_conversations() -> Result<Vec<Channel>, Box<dyn Error>> {
+    let mut response = Client::new()
+        .get("https://slack.com/api/conversations.list")
+        .query(&[
+            ("exclude_archived", "false"),
+            ("limit", "1000"),
+            ("types", "public_channel,private_channel,mpim")
+        ])
+        .header("Authorization", get_token()?)
         .send()?;
 
     let string = response.text()?;
-    println!("{:?}", serde_json::from_str::<ChannelsKind>(&string));
-    let json: ChannelsKind = response.json()?;
-    println!("{:?}", json);
 
-    Ok(())
+    println!("Text: {}", string);
+
+    let result = serde_json::from_str::<ChannelsKind>(&string);
+
+    match result? {
+        ChannelsKind::Error(error) => Err(error)?,
+        ChannelsKind::Channels(channels) => Ok(channels.channels),
+    }
+}
+
+fn ls() {
+    println!("Retrieving conversations...");
+    let conversations = get_conversations().unwrap();
+    println!("Available conversations:");
+    for conversation in conversations {
+        let conversation_type = if conversation.is_channel {
+            "channel"
+        } else if conversation.is_group {
+            "group"
+        } else if conversation.is_im {
+            "im"
+        } else {
+            "unknown"
+        };
+        println!("- {} ({}: {})", conversation.id, conversation_type, conversation.name);
+    }
 }
