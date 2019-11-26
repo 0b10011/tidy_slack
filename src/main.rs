@@ -87,34 +87,42 @@ fn main() {
 
 #[derive(Deserialize, Debug)]
 #[serde(untagged)]
-enum ChannelsKind {
-    Channels(Channels),
-    Error(ChannelsError)
+enum ConversationsKind {
+    Conversations(Conversations),
+    Error(ConversationsError)
 }
 
 #[derive(Deserialize, Debug)]
-struct ChannelsError {
+struct ConversationsError {
     ok: bool,
     error: String,
 }
-impl std::fmt::Display for ChannelsError {
+impl std::fmt::Display for ConversationsError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", self.error)
     }
 }
-impl Error for ChannelsError {
+impl Error for ConversationsError {
 }
 
 #[derive(Deserialize, Debug)]
-struct Channels {
+struct Conversations {
     ok: bool,
     warning: Option<String>,
-    channels: Vec<Channel>,
+    channels: Vec<Conversation>,
     response_metadata: Metadata,
 }
 
 #[derive(Deserialize, Debug)]
-struct Channel {
+#[serde(untagged)]
+enum Conversation {
+    PublicChannel(PublicChannel),
+    PrivateChannel(PrivateChannel),
+    Im(Im),
+}
+
+#[derive(Deserialize, Debug)]
+struct PublicChannel {
     id: String,
     name: String,
     is_channel: bool,
@@ -142,10 +150,55 @@ struct Channel {
     is_open: Option<bool>,
     topic: Topic,
     purpose: Purpose,
-    previous_names: Option<Vec<String>>,
-    num_members: Option<u64>,
+    previous_names: Vec<String>,
+    num_members: u64,
     priority: Option<u64>,
     // locale: String
+}
+
+#[derive(Deserialize, Debug)]
+struct PrivateChannel {
+    id: String,
+    name: String,
+    is_channel: bool,
+    is_group: bool,
+    is_im: bool,
+    created: u64,
+    is_archived: bool,
+    is_general: bool,
+    unlinked: u64,
+    name_normalized: String,
+    is_read_only: Option<bool>, // I'm not seeing this in the response, but it's in documentation, so I made it optional
+    is_shared: bool,
+    parent_conversation: Option<String>,
+    creator: String,
+    is_ext_shared: bool,
+    is_org_shared: bool,
+    shared_team_ids: Vec<String>, // Not in documentation, but shows up in results
+    pending_shared: Vec<String>, // I believe this should always be an empty array?
+    pending_connected_team_ids: Vec<String>, // Not in documentation, but shows up in results
+    is_pending_ext_shared: bool,
+    is_member: bool,
+    is_private: bool,
+    is_mpim: bool,
+    last_read: Option<String>,
+    is_open: Option<bool>,
+    topic: Topic,
+    purpose: Purpose,
+    priority: u64,
+    locale: Option<String>, // I'm not seeing this in the response, but it's in documentation, so I made it optional
+}
+
+#[derive(Deserialize, Debug)]
+struct Im {
+    id: String,
+    created: u64,
+    is_archived: bool,
+    is_im: bool,
+    is_org_shared: bool,
+    user: String,
+    is_user_deleted: bool,
+    priority: u64,
 }
 
 #[derive(Deserialize, Debug)]
@@ -171,26 +224,30 @@ fn get_token() -> Result<String, Box<dyn Error>> {
     Ok(fs::read_to_string("TOKEN")?.parse::<String>()?.trim().to_string())
 }
 
-fn get_conversations() -> Result<Vec<Channel>, Box<dyn Error>> {
+fn get_conversations() -> Result<Vec<Conversation>, Box<dyn Error>> {
     let mut response = Client::new()
         .get("https://slack.com/api/conversations.list")
         .query(&[
             ("exclude_archived", "false"),
             ("limit", "1000"),
-            ("types", "public_channel,private_channel,mpim")
+            // public_channel: #channel
+            // private_channel: 🔒channel
+            // mpim: Multi-person IM
+            // im: Direct message
+            ("types", "public_channel,private_channel,mpim,im")
         ])
         .header("Authorization", get_token()?)
         .send()?;
 
     let string = response.text()?;
 
-    println!("Text: {}", string);
+    // println!("Text: {}", string);
 
-    let result = serde_json::from_str::<ChannelsKind>(&string);
+    let result = serde_json::from_str::<ConversationsKind>(&string);
 
     match result? {
-        ChannelsKind::Error(error) => Err(error)?,
-        ChannelsKind::Channels(channels) => Ok(channels.channels),
+        ConversationsKind::Error(error) => Err(error)?,
+        ConversationsKind::Conversations(conversations) => Ok(conversations.channels),
     }
 }
 
@@ -199,15 +256,16 @@ fn ls() {
     let conversations = get_conversations().unwrap();
     println!("Available conversations:");
     for conversation in conversations {
-        let conversation_type = if conversation.is_channel {
-            "channel"
-        } else if conversation.is_group {
-            "group"
-        } else if conversation.is_im {
-            "im"
-        } else {
-            "unknown"
-        };
-        println!("- {} ({}: {})", conversation.id, conversation_type, conversation.name);
+        match conversation {
+            Conversation::PublicChannel(convo) => {
+                println!("- {} (#{})", convo.id, convo.name);
+            },
+            Conversation::PrivateChannel(convo) => {
+                println!("- {} (🔒{})", convo.id, convo.name);
+            },
+            Conversation::Im(convo) => {
+                println!("- {} (🧑{})", convo.id, convo.user);
+            },
+        }
     }
 }
