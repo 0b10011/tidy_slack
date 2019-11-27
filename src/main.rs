@@ -1,5 +1,6 @@
 extern crate reqwest;
 
+use colored::*;
 use clap::{crate_version, App, AppSettings, Arg, ArgMatches, SubCommand};
 use log::{info, LevelFilter};
 use num_format::{Locale, ToFormattedString};
@@ -430,20 +431,26 @@ fn ls(types: [&str; 4], options: Option<&ArgMatches>) {
                     id: convo.id,
                     type_identifier: "#".to_string(),
                     names: vec![convo.name],
+                    is_archived: convo.is_archived,
+                    is_deleted: false,
                 });
             },
             Conversation::PrivateChannel(mut convo) => {
                 if convo.name.starts_with("mpdm-") {
                     conversations.push(NormalizedConversation {
                         id: convo.id,
-                        type_identifier: "@".to_string(),
+                        type_identifier: "&".to_string(),
                         names: convo.name.split_off(5).rsplitn(2, "-").last().unwrap().split("--").map(|s| s.to_string()).collect(),
+                        is_archived: convo.is_archived,
+                        is_deleted: false,
                     });
                 } else {
                     conversations.push(NormalizedConversation {
                         id: convo.id,
                         type_identifier: "!".to_string(),
                         names: vec![convo.name],
+                        is_archived: convo.is_archived,
+                        is_deleted: false,
                     });
                 }
             },
@@ -452,6 +459,8 @@ fn ls(types: [&str; 4], options: Option<&ArgMatches>) {
                     id: convo.id,
                     type_identifier: "@".to_string(),
                     names: vec![get_user(convo.user).unwrap()],
+                    is_archived: convo.is_archived,
+                    is_deleted: convo.is_user_deleted,
                 });
             },
         }
@@ -465,13 +474,22 @@ fn ls(types: [&str; 4], options: Option<&ArgMatches>) {
     conversations.sort_by(|a, b| a.type_identifier.partial_cmp(&b.type_identifier).unwrap());
 
     for conversation in conversations {
-        println!("- {} ({}{})", conversation.id, &conversation.type_identifier, conversation.names.join(&format!(", {}", &conversation.type_identifier)));
+        let (icon, color) = if conversation.is_deleted {
+            ("🗑", Color::Red)
+        } else if conversation.is_archived {
+            ("🗄", Color::Yellow)
+        } else {
+            ("🗒", Color::White)
+        };
+        println!("{}", format!("{} {} ({}{})", icon, conversation.id, &conversation.type_identifier, conversation.names.join(&format!(", {}", &conversation.type_identifier))).color(color));
     }
 
     #[derive(Debug)]
     struct NormalizedConversation {
         id: String,
         type_identifier: String,
-        names: Vec<String>
+        names: Vec<String>,
+        is_archived: bool,
+        is_deleted: bool,
     }
 }
