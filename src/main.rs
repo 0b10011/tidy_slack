@@ -1,6 +1,6 @@
 extern crate reqwest;
 
-use clap::{crate_version, App, AppSettings, Arg, SubCommand};
+use clap::{crate_version, App, AppSettings, Arg, ArgMatches, SubCommand};
 use log::{info, LevelFilter};
 use num_format::{Locale, ToFormattedString};
 use std::time::Instant;
@@ -23,13 +23,18 @@ fn main() {
         .subcommand(SubCommand::with_name("ls")
             .about("List conversations the authenticated user can access.")
             .arg(
+                Arg::with_name("exclude_archived")
+                    .short("e")
+                    .long("exclude_archived")
+                    .help("If provided, archived channels will be excluded.")
+            )
+            .arg(
                 Arg::with_name("types")
                     .long("types")
                     .possible_values(&types)
                     .takes_value(true)
                     .multiple(true)
-                    .required(true)
-                    .help("Types of messages to list.")
+                    .help("Types of conversations to list.")
             )
         )
         // Verbosity level
@@ -83,10 +88,9 @@ fn main() {
         .init();
 
     if let Some(cmd) = options.subcommand_name() {
+        let sub_options = options.subcommand_matches(cmd);
         match cmd {
-            "ls" => ls(
-                options.values_of_lossy("types").unwrap()
-            ),
+            "ls" => ls(types, sub_options),
             _ => panic!("Unsupported command: {}", cmd),
         }
     };
@@ -237,17 +241,34 @@ fn get_token() -> Result<String, Box<dyn Error>> {
     Ok(fs::read_to_string("TOKEN")?.parse::<String>()?.trim().to_string())
 }
 
-fn get_conversations(enabled_types: Vec<String>) -> Result<Vec<Conversation>, Box<dyn Error>> {
+fn get_conversations(enabled_types: Vec<String>, exclude_archived: bool) -> Result<Vec<Conversation>, Box<dyn Error>> {
+    let mut cursor = "".to_string();
+    let mut conversations = vec![];
+    let enabled_types = &enabled_types.join(",");
+    loop {
+        let mut result = get_conversations_page(enabled_types, exclude_archived, &cursor)?;
+        cursor = result.response_metadata.next_cursor;
+        conversations.append(&mut result.channels);
+        if cursor == "" {
+            break;
+        }
+    }
+
+    return Ok(conversations);
+}
+
+fn get_conversations_page(enabled_types: &str, exclude_archived: bool, cursor: &str) -> Result<Conversations, Box<dyn Error>> {
     let mut response = Client::new()
         .get("https://slack.com/api/conversations.list")
         .query(&[
-            ("exclude_archived", "true"),
-            ("limit", "100"),
+            ("cursor", cursor),
+            ("exclude_archived", if exclude_archived { "true" } else { "false" }),
+            ("limit", "1000"),
             // public_channel: #channel
             // private_channel: 🔒channel
             // mpim: 🧑🧑multi-person-direct-message
             // im: 🧑direct-message
-            ("types", &enabled_types.join(","))
+            ("types", enabled_types)
         ])
         .header("Authorization", get_token()?)
         .send()?;
@@ -260,13 +281,30 @@ fn get_conversations(enabled_types: Vec<String>) -> Result<Vec<Conversation>, Bo
 
     match result? {
         ConversationsKind::Error(error) => Err(error)?,
-        ConversationsKind::Conversations(conversations) => Ok(conversations.channels),
+        ConversationsKind::Conversations(conversations) => Ok(conversations),
     }
 }
 
-fn ls(enabled_types: Vec<String>) {
+fn ls(types: [&str; 4], options: Option<&ArgMatches>) {
     println!("Retrieving conversations...");
-    let conversations = get_conversations(enabled_types).unwrap();
+
+    let enabled_types;
+    let mut exclude_archived = false;
+    if let Some(options) = options {
+        enabled_types = if let Some(specified_types) = options.values_of_lossy("types") {
+            specified_types
+        } else {
+            types.to_vec().iter().map(|s| s.to_string()).collect()
+        };
+        if options.is_present("exclude_archived") {
+            exclude_archived = true;
+        }
+    } else {
+        enabled_types = types.to_vec().iter().map(|s| s.to_string()).collect();
+    };
+
+    let conversations = get_conversations(enabled_types, exclude_archived).unwrap();
+
     println!("Available conversations:");
     for conversation in conversations {
         match conversation {
