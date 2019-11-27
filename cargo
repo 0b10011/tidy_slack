@@ -25,5 +25,6 @@ sudo docker run \
     --mount type=bind,src="$PWD",dst=/usr/src/app \
     --workdir /usr/src/app \
     --env CARGO_HOME=/usr/src/app/.cargo \
+    --tty \
     rust:latest \
     cargo "$@"
