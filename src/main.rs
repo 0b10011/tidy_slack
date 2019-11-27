@@ -37,6 +37,11 @@ fn main() {
                     .multiple(true)
                     .help("Types of conversations to list.")
             )
+            .arg(
+                Arg::with_name("SUBSTRING")
+                    .help("Narrows results down to those that contain provided substring.")
+                    .index(1)
+            )
         )
         // Verbosity level
         .arg(
@@ -404,9 +409,10 @@ fn get_user(user: String) -> Result<String, Box<dyn Error>> {
 }
 
 fn ls(types: [&str; 4], options: Option<&ArgMatches>) {
-    println!("Retrieving conversations...");
+    info!("Retrieving all conversations...");
 
     let enabled_types;
+    let mut substring = "";
     let mut exclude_archived = false;
     if let Some(options) = options {
         enabled_types = if let Some(specified_types) = options.values_of_lossy("types") {
@@ -417,14 +423,19 @@ fn ls(types: [&str; 4], options: Option<&ArgMatches>) {
         if options.is_present("exclude_archived") {
             exclude_archived = true;
         }
+        if let Some(provided_substring) = options.value_of("SUBSTRING") {
+            substring = provided_substring;
+        }
     } else {
         enabled_types = types.to_vec().iter().map(|s| s.to_string()).collect();
     };
 
+    let raw_conversations = get_conversations(enabled_types, exclude_archived).unwrap();
 
-    println!("Available conversations:");
+    info!("Normalizing conversations...");
+
     let mut conversations = vec![];
-    for conversation in get_conversations(enabled_types, exclude_archived).unwrap() {
+    for conversation in raw_conversations {
         match conversation {
             Conversation::PublicChannel(convo) => {
                 conversations.push(NormalizedConversation {
@@ -466,12 +477,35 @@ fn ls(types: [&str; 4], options: Option<&ArgMatches>) {
         }
     }
 
+    if substring != "" {
+        info!("Filtering conversations down to those that contain `{}`...", substring);
+
+        conversations = conversations.into_iter().filter(|convo| {
+            for name in &convo.names {
+                if name.contains(substring) {
+                    return true;
+                }
+            }
+            false
+        }).collect::<Vec<NormalizedConversation>>();
+    }
+
+    info!("Sorting names in multi-person DMs...");
+
     for conversation in &mut conversations {
         conversation.names.sort_unstable();
     }
 
+    info!("Sorting conversations by type and name...");
+
     conversations.sort_unstable_by(|a, b| a.names.partial_cmp(&b.names).unwrap());
     conversations.sort_by(|a, b| a.type_identifier.partial_cmp(&b.type_identifier).unwrap());
+
+    if substring != "" {
+        info!("All conversations you have access to:");
+    } else {
+        info!("All conversations with names that contain `{}` that you have access to:", substring);
+    }
 
     for conversation in conversations {
         let (icon, color) = if conversation.is_deleted {
