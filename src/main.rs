@@ -420,20 +420,57 @@ fn ls(types: [&str; 4], options: Option<&ArgMatches>) {
         enabled_types = types.to_vec().iter().map(|s| s.to_string()).collect();
     };
 
-    let conversations = get_conversations(enabled_types, exclude_archived).unwrap();
 
     println!("Available conversations:");
-    for conversation in conversations {
+    let mut conversations = vec![];
+    for conversation in get_conversations(enabled_types, exclude_archived).unwrap() {
         match conversation {
             Conversation::PublicChannel(convo) => {
-                println!("- {} (#{})", convo.id, convo.name);
+                conversations.push(NormalizedConversation {
+                    id: convo.id,
+                    type_identifier: "#".to_string(),
+                    names: vec![convo.name],
+                });
             },
-            Conversation::PrivateChannel(convo) => {
-                println!("- {} (🔒{})", convo.id, convo.name);
+            Conversation::PrivateChannel(mut convo) => {
+                if convo.name.starts_with("mpdm-") {
+                    conversations.push(NormalizedConversation {
+                        id: convo.id,
+                        type_identifier: "@".to_string(),
+                        names: convo.name.split_off(5).rsplitn(2, "-").last().unwrap().split("--").map(|s| s.to_string()).collect(),
+                    });
+                } else {
+                    conversations.push(NormalizedConversation {
+                        id: convo.id,
+                        type_identifier: "*".to_string(),
+                        names: vec![convo.name],
+                    });
+                }
             },
             Conversation::Im(convo) => {
-                println!("- {} (@{})", convo.id, get_user(convo.user).unwrap());
+                conversations.push(NormalizedConversation {
+                    id: convo.id,
+                    type_identifier: "@".to_string(),
+                    names: vec![get_user(convo.user).unwrap()],
+                });
             },
         }
+    }
+
+    for conversation in &mut conversations {
+        conversation.names.sort();
+    }
+
+    conversations.sort_by(|a, b| a.names.first().partial_cmp(&b.names.first()).unwrap());
+
+    for conversation in conversations {
+        println!("- {} ({}{})", conversation.id, &conversation.type_identifier, conversation.names.join(&format!(", {}", &conversation.type_identifier)));
+    }
+
+    #[derive(Debug)]
+    struct NormalizedConversation {
+        id: String,
+        type_identifier: String,
+        names: Vec<String>
     }
 }
