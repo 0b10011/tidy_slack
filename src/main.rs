@@ -481,7 +481,7 @@ fn ls(types: [&str; 4], options: Option<&ArgMatches>) {
         } else {
             ("🗒", Color::White)
         };
-        println!("{}", format!("{} {} ({}{})", icon, conversation.id, &conversation.type_identifier, conversation.names.join(&format!(", {}", &conversation.type_identifier))).color(color));
+        println!("{}", format!("{} {}: {}{}", icon, conversation.id.bold(), &conversation.type_identifier, conversation.names.join(&format!(", {}", &conversation.type_identifier))).color(color));
     }
 
     #[derive(Debug)]
