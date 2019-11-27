@@ -285,6 +285,123 @@ fn get_conversations_page(enabled_types: &str, exclude_archived: bool, cursor: &
     }
 }
 
+#[derive(Deserialize, Debug)]
+#[serde(untagged)]
+enum UserResult {
+    Success(UserSuccess),
+    Error(UserError)
+}
+
+#[derive(Deserialize, Debug)]
+struct UserSuccess {
+    ok: bool,
+    user: User
+}
+
+#[derive(Deserialize, Debug)]
+#[serde(untagged)]
+enum User {
+    Active(ActiveUser),
+    Deleted(DeletedUser),
+}
+
+#[derive(Deserialize, Debug)]
+struct ActiveUser {
+    id: String,
+    team_id: String,
+    name: String,
+    deleted: bool,
+    color: String,
+    real_name: String,
+    tz: String,
+    tz_label: String,
+    tz_offset: i64,
+    profile: Profile,
+    is_admin: bool,
+    is_owner: bool,
+    is_primary_owner: bool,
+    is_restricted: bool,
+    is_ultra_restricted: bool,
+    is_bot: bool,
+    is_app_user: bool,
+    updated: u64,
+    has_2fa: bool,
+}
+
+#[derive(Deserialize, Debug)]
+struct DeletedUser {
+    id: String,
+    team_id: String,
+    name: String,
+    deleted: bool,
+    profile: Profile,
+    is_bot: bool,
+    is_app_user: bool,
+    updated: u64,
+}
+
+#[derive(Deserialize, Debug)]
+struct Profile {
+    title: String, // Not in documentation
+    phone: String, // Not in documentation
+    skype: String, // Not in documentation
+    real_name: String,
+    real_name_normalized: String,
+    display_name: String,
+    display_name_normalized: String,
+    status_text: String,
+    status_emoji: String,
+    status_expiration: u64, // Not in documentation
+    avatar_hash: String,
+    email: Option<String>, // In documentation, but not response
+    image_original: Option<String>, // In documentation, but not response
+    image_24: String,
+    image_32: String,
+    image_48: String,
+    image_72: String,
+    image_192: String,
+    image_512: String,
+    status_text_canonical: String, // Not in documentation
+    team: String,
+}
+
+#[derive(Deserialize, Debug)]
+struct UserError {
+    ok: bool,
+    error: String,
+}
+impl std::fmt::Display for UserError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.error)
+    }
+}
+impl Error for UserError {
+}
+
+fn get_user(user: String) -> Result<String, Box<dyn Error>> {
+    let mut response = Client::new()
+        .get("https://slack.com/api/users.info")
+        .query(&[
+            ("user", user),
+        ])
+        .header("Authorization", get_token()?)
+        .send()?;
+
+    let string = response.text()?;
+
+    let result = serde_json::from_str::<UserResult>(&string);
+
+    match result? {
+        UserResult::Error(error) => Err(error)?,
+        UserResult::Success(result) => {
+            Ok(match result.user {
+                User::Active(user) => user.name,
+                User::Deleted(user) => user.name,
+            })
+        },
+    }
+}
+
 fn ls(types: [&str; 4], options: Option<&ArgMatches>) {
     println!("Retrieving conversations...");
 
@@ -315,7 +432,7 @@ fn ls(types: [&str; 4], options: Option<&ArgMatches>) {
                 println!("- {} (🔒{})", convo.id, convo.name);
             },
             Conversation::Im(convo) => {
-                println!("- {} (🧑{})", convo.id, convo.user);
+                println!("- {} (@{})", convo.id, get_user(convo.user).unwrap());
             },
         }
     }
