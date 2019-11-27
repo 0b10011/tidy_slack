@@ -442,7 +442,7 @@ fn ls(types: [&str; 4], options: Option<&ArgMatches>) {
                 } else {
                     conversations.push(NormalizedConversation {
                         id: convo.id,
-                        type_identifier: "*".to_string(),
+                        type_identifier: "!".to_string(),
                         names: vec![convo.name],
                     });
                 }
@@ -458,10 +458,11 @@ fn ls(types: [&str; 4], options: Option<&ArgMatches>) {
     }
 
     for conversation in &mut conversations {
-        conversation.names.sort();
+        conversation.names.sort_unstable();
     }
 
-    conversations.sort_by(|a, b| a.names.first().partial_cmp(&b.names.first()).unwrap());
+    conversations.sort_unstable_by(|a, b| a.names.partial_cmp(&b.names).unwrap());
+    conversations.sort_by(|a, b| a.type_identifier.partial_cmp(&b.type_identifier).unwrap());
 
     for conversation in conversations {
         println!("- {} ({}{})", conversation.id, &conversation.type_identifier, conversation.names.join(&format!(", {}", &conversation.type_identifier)));
