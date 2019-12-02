@@ -9,6 +9,7 @@ use std::{fs, u64};
 use std::error::Error;
 use reqwest::Client;
 use serde::{Deserialize};
+use indicatif::{ProgressBar, ProgressStyle};
 
 fn main() {
     let now = Instant::now();
@@ -409,7 +410,15 @@ fn get_user(user: String) -> Result<String, Box<dyn Error>> {
 }
 
 fn ls(types: [&str; 4], options: Option<&ArgMatches>) {
-    info!("Retrieving all conversations...");
+    let style = ProgressStyle::default_bar()
+        .template("{elapsed_precise} [{bar:40}] {pos:>7}/{len:7}\n           {prefix}\n           {msg}")
+        .progress_chars("=> ");
+
+    let length = 4;
+    let main_progress = ProgressBar::new(length);
+    main_progress.set_style(style.clone());
+
+    main_progress.set_prefix("Retrieving all conversations...");
 
     let enabled_types;
     let mut substring = "";
@@ -432,12 +441,17 @@ fn ls(types: [&str; 4], options: Option<&ArgMatches>) {
 
     let raw_conversations = get_conversations(enabled_types, exclude_archived).unwrap();
 
-    info!("Normalizing conversations...");
+    std::thread::sleep(std::time::Duration::new(5, 0));
+
+    main_progress.inc(1);
+    main_progress.set_prefix("Retrieving metadata and normalizing conversations...");
+    main_progress.set_length(raw_conversations.len() as u64 + length);
 
     let mut conversations = vec![];
     for conversation in raw_conversations {
         match conversation {
             Conversation::PublicChannel(convo) => {
+                main_progress.set_message(&format!("Normalizing #{}", convo.name));
                 conversations.push(NormalizedConversation {
                     id: convo.id,
                     type_identifier: "#".to_string(),
@@ -448,6 +462,7 @@ fn ls(types: [&str; 4], options: Option<&ArgMatches>) {
             },
             Conversation::PrivateChannel(mut convo) => {
                 if convo.name.starts_with("mpdm-") {
+                    main_progress.set_message("Normalizing conversation with multiple members");
                     conversations.push(NormalizedConversation {
                         id: convo.id,
                         type_identifier: "&".to_string(),
@@ -456,6 +471,7 @@ fn ls(types: [&str; 4], options: Option<&ArgMatches>) {
                         is_deleted: false,
                     });
                 } else {
+                    main_progress.set_message(&format!("Normalizing private channel #{}", convo.name));
                     conversations.push(NormalizedConversation {
                         id: convo.id,
                         type_identifier: "!".to_string(),
@@ -466,19 +482,24 @@ fn ls(types: [&str; 4], options: Option<&ArgMatches>) {
                 }
             },
             Conversation::Im(convo) => {
+                main_progress.set_message(&format!("Retrieving metadata for user {}", convo.user));
+                let name = get_user(convo.user).unwrap();
+                main_progress.tick();
+                main_progress.set_message(&format!("Normalizing conversation with @{}", name));
                 conversations.push(NormalizedConversation {
                     id: convo.id,
                     type_identifier: "@".to_string(),
-                    names: vec![get_user(convo.user).unwrap()],
+                    names: vec![name],
                     is_archived: convo.is_archived,
                     is_deleted: convo.is_user_deleted,
                 });
             },
         }
+        main_progress.inc(1);
     }
 
     if substring != "" {
-        info!("Filtering conversations down to those that contain `{}`...", substring);
+        main_progress.set_prefix(&format!("Filtering conversations down to those that contain `{}`...", substring));
 
         conversations = conversations.into_iter().filter(|convo| {
             for name in &convo.names {
@@ -490,21 +511,26 @@ fn ls(types: [&str; 4], options: Option<&ArgMatches>) {
         }).collect::<Vec<NormalizedConversation>>();
     }
 
-    info!("Sorting names in multi-person DMs...");
+    main_progress.inc(1);
+    main_progress.set_prefix("Sorting names in multi-person DMs...");
 
     for conversation in &mut conversations {
         conversation.names.sort_unstable();
     }
 
-    info!("Sorting conversations by type and name...");
+    main_progress.inc(1);
+    main_progress.set_prefix("Sorting conversations by type and name...");
 
     conversations.sort_unstable_by(|a, b| a.names.partial_cmp(&b.names).unwrap());
     conversations.sort_by(|a, b| a.type_identifier.partial_cmp(&b.type_identifier).unwrap());
 
+    main_progress.inc(1);
+    main_progress.finish_and_clear();
+
     if substring != "" {
-        info!("All conversations you have access to:");
+        println!("All conversations you have access to:");
     } else {
-        info!("All conversations with names that contain `{}` that you have access to:", substring);
+        println!("All conversations with names that contain `{}` that you have access to:", substring);
     }
 
     for conversation in conversations {
