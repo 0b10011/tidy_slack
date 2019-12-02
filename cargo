@@ -26,5 +26,5 @@ sudo docker run \
     --workdir /usr/src/app \
     --env CARGO_HOME=/usr/src/app/.cargo \
     --tty \
-    rust:latest \
+    $(echo -e "from rust:latest\n\nrun rustup component add rustfmt" | sudo docker build --quiet -) \
     cargo "$@"

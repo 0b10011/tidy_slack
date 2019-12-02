@@ -1,15 +1,15 @@
 extern crate reqwest;
 
-use colored::*;
 use clap::{crate_version, App, AppSettings, Arg, ArgMatches, SubCommand};
+use colored::*;
+use indicatif::{ProgressBar, ProgressStyle};
 use log::{info, LevelFilter};
 use num_format::{Locale, ToFormattedString};
+use reqwest::Client;
+use serde::Deserialize;
+use std::error::Error;
 use std::time::Instant;
 use std::{fs, u64};
-use std::error::Error;
-use reqwest::Client;
-use serde::{Deserialize};
-use indicatif::{ProgressBar, ProgressStyle};
 
 fn main() {
     let now = Instant::now();
@@ -113,7 +113,7 @@ fn main() {
 #[serde(untagged)]
 enum ConversationsKind {
     Conversations(Conversations),
-    Error(ConversationsError)
+    Error(ConversationsError),
 }
 
 #[derive(Deserialize, Debug)]
@@ -126,8 +126,7 @@ impl std::fmt::Display for ConversationsError {
         write!(f, "{}", self.error)
     }
 }
-impl Error for ConversationsError {
-}
+impl Error for ConversationsError {}
 
 #[derive(Deserialize, Debug)]
 struct Conversations {
@@ -164,7 +163,7 @@ struct PublicChannel {
     is_ext_shared: bool,
     is_org_shared: bool,
     shared_team_ids: Vec<String>, // Not in documentation, but shows up in results
-    pending_shared: Vec<String>, // I believe this should always be an empty array?
+    pending_shared: Vec<String>,  // I believe this should always be an empty array?
     pending_connected_team_ids: Vec<String>, // Not in documentation, but shows up in results
     is_pending_ext_shared: bool,
     is_member: bool,
@@ -199,7 +198,7 @@ struct PrivateChannel {
     is_ext_shared: bool,
     is_org_shared: bool,
     shared_team_ids: Vec<String>, // Not in documentation, but shows up in results
-    pending_shared: Vec<String>, // I believe this should always be an empty array?
+    pending_shared: Vec<String>,  // I believe this should always be an empty array?
     pending_connected_team_ids: Vec<String>, // Not in documentation, but shows up in results
     is_pending_ext_shared: bool,
     is_member: bool,
@@ -245,10 +244,16 @@ struct Metadata {
 }
 
 fn get_token() -> Result<String, Box<dyn Error>> {
-    Ok(fs::read_to_string("TOKEN")?.parse::<String>()?.trim().to_string())
+    Ok(fs::read_to_string("TOKEN")?
+        .parse::<String>()?
+        .trim()
+        .to_string())
 }
 
-fn get_conversations(enabled_types: Vec<String>, exclude_archived: bool) -> Result<Vec<Conversation>, Box<dyn Error>> {
+fn get_conversations(
+    enabled_types: Vec<String>,
+    exclude_archived: bool,
+) -> Result<Vec<Conversation>, Box<dyn Error>> {
     let mut cursor = "".to_string();
     let mut conversations = vec![];
     let enabled_types = &enabled_types.join(",");
@@ -264,18 +269,25 @@ fn get_conversations(enabled_types: Vec<String>, exclude_archived: bool) -> Resu
     return Ok(conversations);
 }
 
-fn get_conversations_page(enabled_types: &str, exclude_archived: bool, cursor: &str) -> Result<Conversations, Box<dyn Error>> {
+fn get_conversations_page(
+    enabled_types: &str,
+    exclude_archived: bool,
+    cursor: &str,
+) -> Result<Conversations, Box<dyn Error>> {
     let mut response = Client::new()
         .get("https://slack.com/api/conversations.list")
         .query(&[
             ("cursor", cursor),
-            ("exclude_archived", if exclude_archived { "true" } else { "false" }),
+            (
+                "exclude_archived",
+                if exclude_archived { "true" } else { "false" },
+            ),
             ("limit", "1000"),
             // public_channel: #channel
             // private_channel: 🔒channel
             // mpim: 🧑🧑multi-person-direct-message
             // im: 🧑direct-message
-            ("types", enabled_types)
+            ("types", enabled_types),
         ])
         .header("Authorization", get_token()?)
         .send()?;
@@ -296,13 +308,13 @@ fn get_conversations_page(enabled_types: &str, exclude_archived: bool, cursor: &
 #[serde(untagged)]
 enum UserResult {
     Success(UserSuccess),
-    Error(UserError)
+    Error(UserError),
 }
 
 #[derive(Deserialize, Debug)]
 struct UserSuccess {
     ok: bool,
-    user: User
+    user: User,
 }
 
 #[derive(Deserialize, Debug)]
@@ -360,7 +372,7 @@ struct Profile {
     status_emoji: String,
     status_expiration: u64, // Not in documentation
     avatar_hash: String,
-    email: Option<String>, // In documentation, but not response
+    email: Option<String>,          // In documentation, but not response
     image_original: Option<String>, // In documentation, but not response
     image_24: String,
     image_32: String,
@@ -382,15 +394,12 @@ impl std::fmt::Display for UserError {
         write!(f, "{}", self.error)
     }
 }
-impl Error for UserError {
-}
+impl Error for UserError {}
 
 fn get_user(user: String) -> Result<String, Box<dyn Error>> {
     let mut response = Client::new()
         .get("https://slack.com/api/users.info")
-        .query(&[
-            ("user", user),
-        ])
+        .query(&[("user", user)])
         .header("Authorization", get_token()?)
         .send()?;
 
@@ -400,18 +409,18 @@ fn get_user(user: String) -> Result<String, Box<dyn Error>> {
 
     match result? {
         UserResult::Error(error) => Err(error)?,
-        UserResult::Success(result) => {
-            Ok(match result.user {
-                User::Active(user) => user.name,
-                User::Deleted(user) => user.name,
-            })
-        },
+        UserResult::Success(result) => Ok(match result.user {
+            User::Active(user) => user.name,
+            User::Deleted(user) => user.name,
+        }),
     }
 }
 
 fn ls(types: [&str; 4], options: Option<&ArgMatches>) {
     let style = ProgressStyle::default_bar()
-        .template("{elapsed_precise} [{bar:40}] {pos:>7}/{len:7}\n           {prefix}\n           {msg}")
+        .template(
+            "{elapsed_precise} [{bar:40}] {pos:>7}/{len:7}\n           {prefix}\n           {msg}",
+        )
         .progress_chars("=> ");
 
     let length = 4;
@@ -459,19 +468,28 @@ fn ls(types: [&str; 4], options: Option<&ArgMatches>) {
                     is_archived: convo.is_archived,
                     is_deleted: false,
                 });
-            },
+            }
             Conversation::PrivateChannel(mut convo) => {
                 if convo.name.starts_with("mpdm-") {
                     main_progress.set_message("Normalizing conversation with multiple members");
                     conversations.push(NormalizedConversation {
                         id: convo.id,
                         type_identifier: "&".to_string(),
-                        names: convo.name.split_off(5).rsplitn(2, "-").last().unwrap().split("--").map(|s| s.to_string()).collect(),
+                        names: convo
+                            .name
+                            .split_off(5)
+                            .rsplitn(2, "-")
+                            .last()
+                            .unwrap()
+                            .split("--")
+                            .map(|s| s.to_string())
+                            .collect(),
                         is_archived: convo.is_archived,
                         is_deleted: false,
                     });
                 } else {
-                    main_progress.set_message(&format!("Normalizing private channel #{}", convo.name));
+                    main_progress
+                        .set_message(&format!("Normalizing private channel #{}", convo.name));
                     conversations.push(NormalizedConversation {
                         id: convo.id,
                         type_identifier: "!".to_string(),
@@ -480,7 +498,7 @@ fn ls(types: [&str; 4], options: Option<&ArgMatches>) {
                         is_deleted: false,
                     });
                 }
-            },
+            }
             Conversation::Im(convo) => {
                 main_progress.set_message(&format!("Retrieving metadata for user {}", convo.user));
                 let name = get_user(convo.user).unwrap();
@@ -493,22 +511,28 @@ fn ls(types: [&str; 4], options: Option<&ArgMatches>) {
                     is_archived: convo.is_archived,
                     is_deleted: convo.is_user_deleted,
                 });
-            },
+            }
         }
         main_progress.inc(1);
     }
 
     if substring != "" {
-        main_progress.set_prefix(&format!("Filtering conversations down to those that contain `{}`...", substring));
+        main_progress.set_prefix(&format!(
+            "Filtering conversations down to those that contain `{}`...",
+            substring
+        ));
 
-        conversations = conversations.into_iter().filter(|convo| {
-            for name in &convo.names {
-                if name.contains(substring) {
-                    return true;
+        conversations = conversations
+            .into_iter()
+            .filter(|convo| {
+                for name in &convo.names {
+                    if name.contains(substring) {
+                        return true;
+                    }
                 }
-            }
-            false
-        }).collect::<Vec<NormalizedConversation>>();
+                false
+            })
+            .collect::<Vec<NormalizedConversation>>();
     }
 
     main_progress.inc(1);
@@ -530,7 +554,10 @@ fn ls(types: [&str; 4], options: Option<&ArgMatches>) {
     if substring != "" {
         println!("All conversations you have access to:");
     } else {
-        println!("All conversations with names that contain `{}` that you have access to:", substring);
+        println!(
+            "All conversations with names that contain `{}` that you have access to:",
+            substring
+        );
     }
 
     for conversation in conversations {
@@ -541,7 +568,19 @@ fn ls(types: [&str; 4], options: Option<&ArgMatches>) {
         } else {
             ("🗒", Color::White)
         };
-        println!("{}", format!("{} {}: {}{}", icon, conversation.id.bold(), &conversation.type_identifier, conversation.names.join(&format!(", {}", &conversation.type_identifier))).color(color));
+        println!(
+            "{}",
+            format!(
+                "{} {}: {}{}",
+                icon,
+                conversation.id.bold(),
+                &conversation.type_identifier,
+                conversation
+                    .names
+                    .join(&format!(", {}", &conversation.type_identifier))
+            )
+            .color(color)
+        );
     }
 
     #[derive(Debug)]
